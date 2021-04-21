@@ -1,0 +1,246 @@
+DiaGrammar [
+    Options: [
+        grammar-only?: false 
+        ruleset: true 
+        hovering: true 
+        string-input: true 
+        case-parsing: false 
+        live-parse?: true 
+        iterate-times: 1 
+        max-iterate: 5 
+        font-size: 11 
+        selected-rule: "ComponentPath_OLD" 
+        latest-inputs: []
+    ]
+]
+; Lexical Grammar
+; Derived from %DeclarationReference.grammarkdown
+; Formatted for use with Redlake Technologies DiaGrammar
+
+SourceCharacter: [
+    skip          ; Any unicode code point
+]
+
+WhiteSpace: charset [
+    #"^(09)"      ;<TAB>
+    #"^(0B)"      ;<VT>
+    #"^(0C)"      ;<FF>
+    #"^(20)"      ;<SP>
+    #"^(A0)"      ;<NBSP>
+    #"^(FEFF)"    ;<ZWNBSP>
+
+    ;(USP)         ;<USP> 
+    [
+        #"^(1680)"    ;Ogham Space Mark
+        #"^(2000)"    ;En Quad
+        #"^(2001)"    ;Em Quad
+        #"^(2002)"    ;En Space
+        #"^(2003)"    ;Em Space
+        #"^(2004)"    ;Three-Per-Em Space
+        #"^(2005)"    ;Four-Per-Em Space
+        #"^(2006)"    ;Six-Per-Em Space
+        #"^(2007)"    ;Figure Space
+        #"^(2008)"    ;Punctuation Space
+        #"^(2009)"    ;Thin Space
+        #"^(200A)"    ;Hair Space
+        #"^(202F)"    ;NNBSP - Narrow No-Break Space (NNBSP)
+        #"^(205F)"    ;MMSP - Medium Mathematical Space (MMSP)
+        #"^(3000)"    ;Ideographic Space
+    ]
+
+]
+
+LineTerminator: [
+      #"^(0A)"     ;<LF>
+    | #"^(0D)"     ;<CR>
+    | #"^(2028)"   ;<LS>
+    | #"^(2029)"   ;<PS>
+]
+
+; MeaningKeyword represents each of the possible meanings of a TypeScript symbol, 
+; in addition to some custom types.
+MeaningKeyword: [
+      "class"        ; SymbolFlags.Class
+    | "interface"    ; SymbolFlags.Interface
+    | "type"         ; SymbolFlags.TypeAlias
+    | "enum"         ; SymbolFlags.Enum
+    | "namespace"    ; SymbolFlags.Module
+    | "function"     ; SymbolFlags.Function
+    | "var"          ; SymbolFlags.Variable
+    | "constructor"  ; SymbolFlags.Constructor
+    | "member"       ; SymbolFlags.ClassMember | SymbolFlags.EnumMember
+    | "event"        ; 
+    | "call"         ; SymbolFlags.Signature (for __call)
+    | "new"          ; SymbolFlags.Signature (for __new)
+    | "index"        ; SymbolFlags.Signature (for __index)
+    | "complex"      ; Any complex type
+]
+
+Punctuator: charset "{}()[]!.#~:,"
+
+FutureReservedPunctuator: charset "{}@"
+
+NavigationPunctuator: charset ".#~" 
+;    #"."           ; Navigate via 'exports' of symbol
+;    #"#"           ; Navigate via 'members' of symbol
+;    #"~"           ; Navigate via 'locals' of symbol
+
+
+DecimalDigits: [
+    some DecimalDigit 
+]
+
+DecimalDigit: charset "0123456789"
+
+HexDigits: [some HexDigit]
+
+HexDigit: charset "0123456789abcdefABCDEF"
+
+String: [
+    #"^"" any StringCharacter #"^"" 
+]
+
+StringCharacter: [
+      not [#"^"" | #"\" | LineTerminator] SourceCharacter 
+    | "\" EscapeSequence 
+]
+
+EscapeSequence: [
+      CharacterEscapeSequence
+    | #"0" not DecimalDigit
+    | HexEscapeSequence
+    | UnicodeEscapeSequence 
+]
+
+CharacterEscapeSequence: [
+      SingleEscapeCharacter
+    | NonEscapeCharacter 
+]
+
+SingleEscapeCharacter: charset {'"\bfnrtv}
+
+NonEscapeCharacter: [
+    not [ 
+          EscapeCharacter 
+        | LineTerminator 
+    ]
+    SourceCharacter 
+]
+
+EscapeCharacter: [
+      SingleEscapeCharacter
+    | DecimalDigit
+    | #"x"
+    | #"u" 
+]
+
+HexEscapeSequence: [
+    #"x" 2 HexDigit 
+]
+
+UnicodeEscapeSequence: [
+      #"u" Hex4Digits
+    | #"u" #"{" CodePoint #"}" 
+]
+
+Hex4Digits: [
+    4 HexDigit 
+]
+
+CodePoint: charset [
+    #"^(00)" - #"^(10FFFF)"     ; > |HexDigits| but only if MV of |HexDigits| ≤ 0x10FFFF
+]
+
+; Represents the path for a module
+ModuleSource: [
+      String
+    | ModuleSourceCharacters 
+]
+
+ModuleSourceCharacters: [
+    some ModuleSourceCharacter 
+]
+
+ModuleSourceCharacter: [
+    not [
+          #"^"" 
+        | #"!" 
+        | LineTerminator 
+    ]
+    SourceCharacter 
+]
+
+Component: [
+      String
+    | ComponentCharacters
+    | #"[" DeclarationReference "]" 
+]
+
+ComponentCharacters: [
+    some ComponentCharacter 
+]
+
+ComponentCharacter: [
+    not [ 
+          #"^"" 
+        | Punctuator 
+        | FutureReservedPunctuator 
+        | WhiteSpace 
+        | LineTerminator 
+    ] 
+    SourceCharacter 
+]
+
+;
+; Syntactic Grammar
+;
+
+; NOTE: The following grammar is incorrect as |SymbolReference| and |ModuleSource| have an
+;       ambiguous parse. The correct solution is to use a cover grammar to parse
+;       |SymbolReference| until we hit a "!" and then reinterpret the grammar.
+; NB! Changed ordering
+DeclarationReference: [
+    opt [
+          SymbolReference                               ; Shorthand reference to symbol
+        | ModuleSource #"!" #"~" SymbolReference        ; Reference to a local of a module
+        | ModuleSource #"!" SymbolReference             ; Reference to an export of a module
+        | ModuleSource #"!"                             ; Reference to a module
+        | #"!" SymbolReference                          ; Reference to global symbol
+    ]
+]
+
+SymbolReference: [
+      ComponentPath opt Meaning
+    | Meaning 
+]
+
+ComponentPath_OLD: [  
+    opt [
+        ComponentPath [
+              "."                       ; Navigate via 'exports' of |ComponentPath|
+            | "#"                       ; Navigate via 'members' of |ComponentPath|
+            | "~"                       ; Navigate via 'locals'  of |ComponentPath|
+        ]
+    ] Component 
+]
+
+;Changed from left-recursive (see above)
+ComponentPath: [
+    Component any [
+        [
+              "."                       ; Navigate via 'exports' of |ComponentPath|
+            | "#"                       ; Navigate via 'members' of |ComponentPath|
+            | "~"                       ; Navigate via 'locals'  of |ComponentPath|
+        ]
+        Component
+    ]
+]  
+
+Meaning: [
+    #":" [
+          MeaningKeyword #"(" DecimalDigits #")"    ; Indicates an overloaded meaning (i.e. ':function(1)')
+        | MeaningKeyword                       ; Indicates the meaning of a symbol (i.e. ':class')
+        | #"(" DecimalDigits #")"              ; Shorthand for an overloaded meaning (i.e. ":(1)")
+        | DecimalDigits                        ; Shorthand for an overloaded meaning (i.e. ':1')
+    ]
+]
